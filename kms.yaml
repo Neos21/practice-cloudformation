@@ -1,0 +1,76 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'KMS'
+
+Resources:
+  KMSKey:
+    Type: 'AWS::KMS::Key'
+    Properties:
+      Description: 'KMS Key'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: 'kms-key'
+        Statement:
+          - Sid: 'Allow Access Through Backup For All Principals In The Account That Are Authorized To Use Backup Storage'
+            Effect: 'Allow'
+            Principal:
+              AWS: '*'
+            Action:
+              - 'kms:CreateGrant'
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey*'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:CallerAccount': !Sub ${AWS::AccountId}
+                'kms:ViaService': 'backup.ap-northeast-1.amazonaws.com'
+          - Sid: 'Allow Alias Creation During Setup'
+            Effect: 'Allow'
+            Principal:
+              AWS: '*'
+            Action: 'kms:CreateAlias'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:CallerAccount': !Sub ${AWS::AccountId}
+                'kms:ViaService': !Sub cloudformation.${AWS::Region}.amazonaws.com
+          - Sid: 'Allow Direct Access To Key Metadata To The Account'
+            Effect: 'Allow'
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action:
+              - 'kms:Describe*'
+              - 'kms:Get*'
+              - 'kms:List*'
+              - 'kms:RevokeGrant'
+            Resource: '*'
+          - Sid: 'Allow Use Of The Key By Authorized Backup Principal'
+            Effect: 'Allow'
+            Principal:
+              AWS:
+                - !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/backup.amazonaws.com/AWSServiceRoleForBackup
+                - !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/organizations.amazonaws.com/AWSServiceRoleForOrganizations
+            Action:
+              - 'kms:DescribeKey'
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey'
+              - 'kms:GenerateDataKey*'
+              - 'kms:GenerateDataKeyWithoutPlaintext'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'kms:ViaService': 'backup.amazonaws.com'
+          - Sid: 'Enable IAM User Permissions'
+            Effect: 'Allow'
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: 'kms:*'
+            Resource: '*'
+  
+  KMSAlias:
+    Type: 'AWS::KMS::Alias'
+    Properties:
+      AliasName: 'alias/kms-key'
+      TargetKeyId: !Ref KMSKey

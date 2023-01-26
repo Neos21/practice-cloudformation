@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Backup S3'
+
+Resources:
+  BackupVault:
+    Type: 'AWS::Backup::BackupVault'
+    Properties:
+      BackupVaultName: 'my-backup-vault'
+      EncryptionKeyArn: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/00000000-0000-0000-0000-000000000000
+      LockConfiguration:
+        ChangeableForDays: 3
+        MinRetentionDays: 5
+        MaxRetentionDays: 5
+  
+  BackupPlan:
+    Type: 'AWS::Backup::BackupPlan'
+    Properties:
+      BackupPlan:
+        BackupPlanName: 'my-backup-plan'
+        BackupPlanRule:
+          - RuleName: 'my-backup-rule'
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: 'cron(* 0 * ? * *)'
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 720
+            Lifecycle:
+              DeleteAfterDays: 5
+            CopyActions:
+              - DestinationBackupVaultArn: arn:aws:backup:REGION:ACCOUNT-ID:backup-vault:another-backup-vault
+                Lifecycle:
+                  DeleteAfterDays: 5
+  
+  BackupSelection:
+    Type: 'AWS::Backup::BackupSelection'
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: 'my-backup-selection'
+        IamRoleArn: !GetAtt IAMRole.Arn
+        Resources:
+          - !Sub arn:aws:s3::${AWS::AccountId}:my-s3-bucket
+  
+  ManagedPolicyBackup:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      ManagedPolicyName: 'managed-policy-backup'
+      Path: '/'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'EventsPermissions'
+            Effect: 'Allow'
+            Action:
+              - 'events:DescribeRule'
+              - 'events:EnableRule'
+              - 'events:PutRule'
+              - 'events:DeleteRule'
+              - 'events:PutTargets'
+              - 'events:RemoveTargets'
+              - 'events:ListTargetsByRule'
+              - 'events:DisableRule'
+            Resource: 'arn:aws:events:*:*:rule/AwsBackupManagedRule*'
+          - Sid: 'EventsMetricsGlobalPermissions'
+          - Sid: 'KMSBackupPermissions'
+            Effect: 'Allow'
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              StringLike:
+                'kms:ViaService':
+                  - 's3.*.amazonaws.com'
+            Effect: 'Allow'
+            Action:
+              - 'cloudwatch:GetMetricData'
+              - 'events:ListRules'
+            Resource: '*'
+          - Sid: 'S3BucketBackupPermissions'
+            Effect: 'Allow'
+            Action:
+              - 's3:GetInventoryConfiguration'
+              - 's3:PutInventoryConfiguration'
+              - 's3:ListBucketVersions'
+              - 's3:ListBucket'
+              - 's3:GetBucketVersioning'
+              - 's3:GetBucketNotification'
+              - 's3:PutBucketNotification'
+              - 's3:GetBucketLocation'
+              - 's3:GetBucketTagging'
+            Resource: 'arn:aws:s3:::*'
+          - Sid: 'S3GlobalPermissions'
+            Effect: 'Allow'
+            Action:
+              - 's3:ListAllMyBuckets'
+            Resource: '*'
+          - Sid: 'S3ObjectBackupPermissions'
+            Effect: 'Allow'
+            Action:
+              - 's3:GetObjectAcl'
+              - 's3:GetObject'
+              - 's3:GetObjectVersionTagging'
+              - 's3:GetObjectVersionAcl'
+              - 's3:GetObjectTagging'
+              - 's3:GetObjectVersion'
+            Resource: 'arn:aws:s3:::*/*'
+  
+  ManagedPolicyRestore:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      ManagedPolicyName: 'managed-policy-restore'
+      Path: '/'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'S3BucketRestorePermissions'
+            Effect: 'Allow'
+            Action:
+              - 's3:CreateBucket'
+              - 's3:ListBucketVersions'
+              - 's3:ListBucket'
+              - 's3:GetBucketVersioning'
+              - 's3:GetBucketLocation'
+              - 's3:PutBucketVersioning'
+            Resource: 'arn:aws:s3:::*'
+          - Sid: 'S3KMSPermissions'
+            Effect: 'Allow'
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+              - 'kms:GenerateDataKey'
+            Resource: '*'
+            Condition:
+              StringLike:
+                'kms:ViaService':
+                  - 's3.*.amazonaws.com'
+          - Sid: 'S3ObjectRestorePermissions'
+            Effect: 'Allow'
+            Action:
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+              - 's3:DeleteObject'
+              - 's3:PutObjectVersionAcl'
+              - 's3:GetObjectVersionAcl'
+              - 's3:GetObjectTagging'
+              - 's3:PutObjectTagging'
+              - 's3:GetObjectAcl'
+              - 's3:PutObjectAcl'
+              - 's3:PutObject'
+              - 's3:ListMultipartUploadParts'
+            Resource: 'arn:aws:s3:::*/*'
+  
+  IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'AWSBackupDefaultServiceRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action: 'sts:AssumeRole'
+            Principal:
+              Service: 'backup.amazonaws.com'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup'
+        - 'arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores'
+        - !Ref ManagedPolicyBackup
+        - !Ref ManagedPolicyRestore
+      Path: '/service-role/'
